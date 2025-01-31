@@ -11,7 +11,6 @@ from monai.transforms import (
     RandRotate90d, RandShiftIntensityd, ToTensord
 )
 from monai.data import Dataset, DataLoader
-from topo import multi_class_topological_post_processing  # Import topology-based post-processing
 
 label_mapping = {
     0: 0,   # Background
@@ -35,7 +34,6 @@ def parse_args():
     parser.add_argument("--momentum", type=float, default=0.99, help="Momentum for SGD optimizer")
     parser.add_argument("--num-workers", type=int, default=4, help="Number of workers for data loading")
     parser.add_argument("--save-path", type=str, default="best_model.pth", help="Path to save the trained model")
-    parser.add_argument("--apply-topo", action="store_true", help="Apply Persistent Homology post-processing during training")
     return parser.parse_args()
 
 # **Load Data Paths**
@@ -104,29 +102,7 @@ def train(args):
             optimizer.zero_grad()
             outputs = model(inputs)
 
-            # **Apply Topological Post-Processing One Image at a Time**
-            if args.apply_topo:
-                print("Applying Persistent Homology Post-Processing...")
-                processed_outputs = []
-                for i in range(inputs.shape[0]):  # Process each image separately
-                    input_single = inputs[i].unsqueeze(0)  # Extract single image
-                    output_single = outputs[i].unsqueeze(0)  # Extract single prediction
-                    
-                    # **Topological Post-Processing**
-                    prior = {
-                        (1,): (1, 0, 0),  # Class 1 should have 1 component, 0 loops, 0 voids
-                        (2,): (1, 0, 0),  # Class 2 should have 1 component, 0 loops, 0 voids
-                        (3,): (1, 0, 0),  # Class 3 should have 1 component, 0 loops, 0 voids
-                        (4,): (1, 0, 0)   # Class 4 should have 1 component, 0 loops, 0 voids
-                    }
-                    refined_output = multi_class_topological_post_processing(
-                        input_single, model, prior, lr=1e-5, mse_lambda=1.0
-                    )
-                    processed_outputs.append(refined_output)
-
-                # **Stack Processed Outputs to Reconstruct the Batch**
-                outputs = torch.cat(processed_outputs, dim=0)
-
+            
             # **Compute Loss**
             loss = loss_function(outputs, labels.squeeze(1).long())
             loss.backward()
