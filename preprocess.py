@@ -1,18 +1,21 @@
 import tqdm
-import cc3d
 import numpy as np
 import SimpleITK as sitk
 import os
 import argparse
 
+import SimpleITK as sitk
+import numpy as np
+
 def preprocess_image(image_path, label_path, target_spacing=(1.0, 1.0, 1.0), margin=10):
     """ Preprocess 3D medical images: resampling, normalization, cropping tightly around the foreground. """
     
+    # Load the image and label
     image = sitk.ReadImage(image_path)
     label = sitk.ReadImage(label_path)
 
     # Resampling to target spacing
-    def resample(image, target_spacing):
+    def resample(image, target_spacing, is_label=False):
         resampler = sitk.ResampleImageFilter()
         resampler.SetOutputSpacing(target_spacing)
         orig_size = np.array(image.GetSize(), dtype=np.int32)
@@ -21,19 +24,24 @@ def preprocess_image(image_path, label_path, target_spacing=(1.0, 1.0, 1.0), mar
         resampler.SetSize(new_size)
         resampler.SetOutputOrigin(image.GetOrigin())
         resampler.SetOutputDirection(image.GetDirection())
-        resampler.SetInterpolator(sitk.sitkLinear if image.GetPixelID() != sitk.sitkUInt8 else sitk.sitkNearestNeighbor)
+        # Use nearest-neighbor interpolation for labels
+        resampler.SetInterpolator(sitk.sitkNearestNeighbor if is_label else sitk.sitkLinear)
         return resampler.Execute(image)
 
-    image = resample(image, target_spacing)
-    label = resample(label, target_spacing)
+    # Resample image and label
+    image = resample(image, target_spacing, is_label=False)
+    label = resample(label, target_spacing, is_label=True)
 
     # Convert images to NumPy arrays
     image_np = sitk.GetArrayFromImage(image)
     label_np = sitk.GetArrayFromImage(label)
 
     # **Find Foreground Bounding Box**
-    labels_out = cc3d.connected_components(label_np)  # Label connected components
-    coords = np.argwhere(labels_out > 0)  # Find nonzero (foreground) pixels
+    # Use the original label values to find the bounding box
+    coords = np.argwhere(label_np > 0)  # Find nonzero (foreground) pixels
+    if len(coords) == 0:
+        raise ValueError("No foreground found in the label volume.")
+    
     min_coords = coords.min(axis=0)  # Min bounds
     max_coords = coords.max(axis=0)  # Max bounds
 
@@ -44,7 +52,8 @@ def preprocess_image(image_path, label_path, target_spacing=(1.0, 1.0, 1.0), mar
     # **Crop the image & label tightly around the foreground**
     cropped_image_np = image_np[min_coords[0]:max_coords[0], min_coords[1]:max_coords[1], min_coords[2]:max_coords[2]]
     cropped_label_np = label_np[min_coords[0]:max_coords[0], min_coords[1]:max_coords[1], min_coords[2]:max_coords[2]]
-    # After creating cropped images, update their information
+
+    # Convert back to SimpleITK images
     cropped_image = sitk.GetImageFromArray(cropped_image_np)
     cropped_label = sitk.GetImageFromArray(cropped_label_np)
 
@@ -58,6 +67,7 @@ def preprocess_image(image_path, label_path, target_spacing=(1.0, 1.0, 1.0), mar
     new_origin = [o + s * m for o, s, m in zip(image.GetOrigin(), image.GetSpacing(), min_coords)]
     cropped_image.SetOrigin(new_origin)
     cropped_label.SetOrigin(new_origin)
+
     return cropped_image, cropped_label
 
 def preprocess_data_folder(data_dir, output_dir, target_spacing=(1.0, 1.0, 1.0), margin=10):
