@@ -97,7 +97,9 @@ def evaluate_model(model_path, test_data_dir, output_report, apply_cca_flag, app
                     (4,): (1, 0, 0)   # Class 4 should have 1 component, 0 loops, 0 voids
                 }
                 pred_tensor = torch.tensor(pred, dtype=torch.float32, device=device).unsqueeze(0).unsqueeze(0)
-                pred_tensor = multi_class_topological_post_processing(pred_tensor, model, prior, lr=1e-5, mse_lambda=1.0)
+                pred_tensor = multi_class_topological_post_processing(pred_tensor,
+                                                                      model, prior, lr=1e-5, mse_lambda=1, num_its=100,
+                                                                      construction='0', thresh=0.5, parallel=False)
                 pred = torch.argmax(pred_tensor.cpu(), dim=1).squeeze(0).numpy()
 
             # **Compute Metrics**
