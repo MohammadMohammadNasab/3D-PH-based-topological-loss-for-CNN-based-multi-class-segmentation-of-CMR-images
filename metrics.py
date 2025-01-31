@@ -1,37 +1,17 @@
 import gudhi as gd
 from gudhi.cubical_complex import CubicalComplex
-import cc3d
-from scipy.spatial.distance import directed_hausdorff
 import numpy as np
+from scipy.spatial.distance import directed_hausdorff
 
 
 def dice_coefficient(pred, gt, epsilon=1e-6):
-    """
-    Compute Dice Similarity Coefficient (DSC) for binary masks.
-
-    Args:
-        pred (numpy.ndarray): Predicted binary segmentation mask.
-        gt (numpy.ndarray): Ground truth binary segmentation mask.
-        epsilon (float): Small constant to avoid division by zero.
-
-    Returns:
-        float: Dice Similarity Coefficient (DSC)
-    """
+    """Compute Dice Similarity Coefficient (DSC) for binary masks."""
     intersection = np.sum(pred * gt)
-    return (2. * intersection + epsilon) / (np.sum(pred) + np.sum(gt) + epsilon) 
+    return (2. * intersection + epsilon) / (np.sum(pred) + np.sum(gt) + epsilon)
 
 
 def hausdorff_distance(pred, gt):
-    """
-    Compute Hausdorff Distance (HDD) between two binary masks.
-
-    Args:
-        pred (numpy.ndarray): Predicted binary segmentation mask.
-        gt (numpy.ndarray): Ground truth binary segmentation mask.
-
-    Returns:
-        float: Hausdorff Distance
-    """
+    """Compute Hausdorff Distance (HDD) between two binary masks."""
     pred_points = np.argwhere(pred > 0)
     gt_points = np.argwhere(gt > 0)
 
@@ -43,45 +23,6 @@ def hausdorff_distance(pred, gt):
 
     return max(h1, h2)
 
-
-
-def betti_error(pred, gt):
-    """
-    Compute Betti Error (BE) by comparing 3D topological structures.
-
-    Args:
-        pred (numpy.ndarray): Predicted binary segmentation mask.
-        gt (numpy.ndarray): Ground truth binary segmentation mask.
-
-    Returns:
-        int: Betti Error (BE)
-    """
-    # Compute Betti numbers for prediction and ground truth
-    b0_pred, b1_pred, b2_pred = compute_betti_numbers(pred)
-    b0_gt, b1_gt, b2_gt = compute_betti_numbers(gt)
-
-    # Betti Error is the sum of absolute differences across Betti numbers
-    return abs(b0_pred - b0_gt) + abs(b1_pred - b1_gt) + abs(b2_pred - b2_gt)
-
-# Example Usage:
-# betti_err = betti_error(pred_mask, gt_mask)
-
-
-def topological_success_rate(predictions, ground_truths):
-    """
-    Compute the Topological Success (TS) rate.
-
-    Args:
-        predictions (list of numpy.ndarray): List of predicted segmentation masks.
-        ground_truths (list of numpy.ndarray): List of ground truth segmentation masks.
-
-    Returns:
-        float: Percentage of cases where Betti Error is zero.
-    """
-    correct_count = sum(1 for pred, gt in zip(predictions, ground_truths) if betti_error(pred, gt) == 0)
-    return (correct_count / len(predictions)) * 100 if len(predictions) > 0 else 0.0
-
-import numpy as np
 
 def compute_betti_numbers_cubical(mask):
     """
@@ -108,3 +49,108 @@ def compute_betti_numbers_cubical(mask):
     b2 = cubical_complex.betti_number(2)  # Number of voids (2D holes)
 
     return b0, b1, b2
+
+
+def compute_class_combinations_betti(segmentation, num_classes=5):
+    """
+    Compute Betti numbers for each foreground class (1-5) and their pairwise combinations.
+
+    Args:
+        segmentation (np.ndarray): 3D segmentation mask with multiple classes.
+        num_classes (int): Number of foreground classes (excluding background 0).
+
+    Returns:
+        dict: Dictionary containing Betti numbers for each class and class pair.
+    """
+    combinations = {
+        (c,): None for c in range(1, num_classes + 1)  # Single classes
+    }
+
+    # Compute single-class Betti numbers
+    for class_idx in range(1, num_classes + 1):
+        class_mask = (segmentation == class_idx).astype(np.uint8)
+        if np.sum(class_mask) > 0:  # Compute only if the class exists
+            combinations[(class_idx,)] = compute_betti_numbers_cubical(class_mask)
+        else:
+            combinations[(class_idx,)] = (0, 0, 0)
+
+    # Compute pairwise combinations
+    for i in range(1, num_classes):
+        for j in range(i + 1, num_classes + 1):
+            combined_mask = ((segmentation == i) | (segmentation == j)).astype(np.uint8)
+            if np.sum(combined_mask) > 0:
+                combinations[(i, j)] = compute_betti_numbers_cubical(combined_mask)
+            else:
+                combinations[(i, j)] = (0, 0, 0)
+
+    return combinations
+
+
+def betti_error_multi_class(pred, gt, num_classes=5):
+    """
+    Compute Betti Error (BE) for a multi-class 3D segmentation.
+
+    Args:
+        pred (numpy.ndarray): Predicted 3D segmentation mask.
+        gt (numpy.ndarray): Ground truth 3D segmentation mask.
+        num_classes (int): Number of foreground classes (default=5).
+
+    Returns:
+        float: Betti Error (sum of absolute differences across all classes and class combinations).
+    """
+    # Compute Betti numbers for each class and class pairs
+    pred_betti = compute_class_combinations_betti(pred, num_classes)
+    gt_betti = compute_class_combinations_betti(gt, num_classes)
+
+    total_error = 0
+
+    # Compute Betti error for single classes
+    for c in range(1, num_classes + 1):
+        total_error += sum(abs(np.array(pred_betti[(c,)]) - np.array(gt_betti[(c,)])))
+
+    # Compute Betti error for class pairs
+    for i in range(1, num_classes):
+        for j in range(i + 1, num_classes + 1):
+            total_error += sum(abs(np.array(pred_betti[(i, j)]) - np.array(gt_betti[(i, j)])))
+
+    return total_error
+
+
+def topological_success_rate(predictions, ground_truths, num_classes=5):
+    """
+    Compute the Topological Success (TS) rate for multi-class segmentation.
+
+    Args:
+        predictions (list of np.ndarray): List of predicted segmentation masks.
+        ground_truths (list of np.ndarray): List of ground truth segmentation masks.
+        num_classes (int): Number of foreground classes.
+
+    Returns:
+        float: Percentage of cases where Betti Error is zero.
+    """
+    correct_count = sum(1 for pred, gt in zip(predictions, ground_truths) if betti_error_multi_class(pred, gt, num_classes) == 0)
+    return (correct_count / len(predictions)) * 100 if len(predictions) > 0 else 0.0
+🚀 What’s New in This Multi-Class Version?
+✅ Computes Betti numbers for each class (1-5) individually
+✅ Computes Betti numbers for class combinations (e.g., RV + MY, MY + LV, etc.)
+✅ Calculates Betti error across all single-class & multi-class regions
+✅ Works for any number of foreground classes (not hardcoded to 5)
+✅ Handles cases where a class is missing from the segmentation
+
+📌 Example Usage
+python
+Copy
+Edit
+# Example 3D prediction and ground truth masks (randomly generated)
+pred_mask = np.random.randint(0, 6, size=(128, 128, 128))  # Values 0-5
+gt_mask = np.random.randint(0, 6, size=(128, 128, 128))  # Values 0-5
+
+# Compute Betti error for multi-class segmentation
+betti_err = betti_error_multi_class(pred_mask, gt_mask, num_classes=5)
+print("Betti Error:", betti_err)
+
+# Compute Topological Success Rate for a batch of predictions
+predictions = [pred_mask for _ in range(10)]
+ground_truths = [gt_mask for _ in range(10)]
+tsr = topological_success_rate(predictions, ground_truths, num_classes=5)
+print("Topological Success Rate:", tsr, "%")
