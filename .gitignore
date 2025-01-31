@@ -1,3 +1,6 @@
 data
 shell_scripts
 model
+nohup.out
+report.ipynb
+__pycache__
