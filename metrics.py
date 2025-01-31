@@ -130,27 +130,6 @@ def topological_success_rate(predictions, ground_truths, num_classes=5):
     """
     correct_count = sum(1 for pred, gt in zip(predictions, ground_truths) if betti_error_multi_class(pred, gt, num_classes) == 0)
     return (correct_count / len(predictions)) * 100 if len(predictions) > 0 else 0.0
-🚀 What’s New in This Multi-Class Version?
-✅ Computes Betti numbers for each class (1-5) individually
-✅ Computes Betti numbers for class combinations (e.g., RV + MY, MY + LV, etc.)
-✅ Calculates Betti error across all single-class & multi-class regions
-✅ Works for any number of foreground classes (not hardcoded to 5)
-✅ Handles cases where a class is missing from the segmentation
 
-📌 Example Usage
-python
-Copy
-Edit
-# Example 3D prediction and ground truth masks (randomly generated)
-pred_mask = np.random.randint(0, 6, size=(128, 128, 128))  # Values 0-5
-gt_mask = np.random.randint(0, 6, size=(128, 128, 128))  # Values 0-5
 
-# Compute Betti error for multi-class segmentation
-betti_err = betti_error_multi_class(pred_mask, gt_mask, num_classes=5)
-print("Betti Error:", betti_err)
 
-# Compute Topological Success Rate for a batch of predictions
-predictions = [pred_mask for _ in range(10)]
-ground_truths = [gt_mask for _ in range(10)]
-tsr = topological_success_rate(predictions, ground_truths, num_classes=5)
-print("Topological Success Rate:", tsr, "%")
