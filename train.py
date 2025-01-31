@@ -6,11 +6,24 @@ import torch.nn as nn
 import torch.optim as optim
 from monai.networks.nets import UNet
 from monai.transforms import (
+    RandAxisFlipd, Resized, Lambdad,
     Compose, LoadImaged,
-    RandRotate90d, RandFlipd, RandShiftIntensityd, RandAffine, ToTensord
+    RandRotate90d, RandShiftIntensityd, ToTensord
 )
 from monai.data import Dataset, DataLoader
 from topo import multi_class_topological_post_processing  # Import topology-based post-processing
+
+label_mapping = {
+    0: 0,   # Background
+    205: 1, # Myocardium (MY)
+    420: 2, # Left Atrium (LA)
+    421: 2, # Mislabelled data considerd as  Left Atrium (LA)
+    500: 3, # Left Ventricle (LV)
+    550: 4, # Right Atrium (RA)
+    600: 5, # Right Ventricle (RV)
+    820: 6, # Ascending Aorta (AA)
+    850: 7  # Pulmonary Artery (PA)
+}
 
 # **Argument Parser**
 def parse_args():
@@ -28,9 +41,15 @@ def parse_args():
 # **Load Data Paths**
 def get_data_list(data_dir):
     """Loads image and label paths into a dictionary."""
-    image_paths = sorted([os.path.join(data_dir, "images", f) for f in os.listdir(os.path.join(data_dir, "images")) if f.endswith(".nii.gz")])
-    label_paths = sorted([os.path.join(data_dir, "labels", f) for f in os.listdir(os.path.join(data_dir, "labels")) if f.endswith(".nii.gz")])
+    image_paths = sorted([os.path.join(data_dir,f) for f in os.listdir(os.path.join(data_dir)) if f.endswith("_image.nii.gz")])
+    label_paths = sorted([os.path.join(data_dir, f) for f in os.listdir(os.path.join(data_dir)) if f.endswith("_label.nii.gz")])
     return [{"image": img, "label": lbl} for img, lbl in zip(image_paths, label_paths)]
+
+def map_labels(label, mapping):
+    """Maps MM-WHS intensity values to class indices."""
+    for raw_value, class_index in mapping.items():
+        label[label == raw_value] = class_index
+    return label
 
 # **Training Function**
 def train(args):
@@ -39,24 +58,30 @@ def train(args):
 
     # **Data Transforms**
     train_transforms = Compose([
-        LoadImaged(keys=["image", "label"]),
-        RandRotate90d(keys=["image", "label"], prob=0.5, spatial_axes=[0, 1, 2]),
-        RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=[0, 1, 2]),
-        RandShiftIntensityd(keys="image", offsets=0.1, prob=0.5),
-        RandAffine(keys=["image", "label"], prob=0.5, rotate_range=[0.1, 0.1, 0.1]),
-        ToTensord(keys=["image", "label"]),
-    ])
+    LoadImaged(keys=["image", "label"], ensure_channel_first=True),
+    Lambdad(keys="label", func=lambda x: map_labels(x, label_mapping)),
+    RandAxisFlipd(keys=["image", "label"], prob=0.5),  # Flip along one random axis
+    RandRotate90d(keys=["image", "label"], prob=0.5, max_k=3, spatial_axes=(1, 2)),  # Rotate in axial plane
+    RandShiftIntensityd(keys="image", offsets=0.15, prob=0.5),
+    Resized(
+        keys=["image", "label"],
+        spatial_size=(192, 160, 160),
+        mode=("trilinear", "nearest")  # Different modes for image/label
+    ),
+    ToTensord(keys=["image", "label"]),
+    Lambdad(keys="label", func=lambda x: x.squeeze(1).long()),
+])
 
     # **Load Data**
-    train_files = get_data_list('/home/bamdad/3D-PH-based-topological-loss-for-CNN-based-multi-class-segmentation-of-CMR-images/data/preprocessed_data')
-    train_ds = Dataset(data=train_files, transform=train_transforms)
+    train_files = get_data_list(args.data_dir)
+    train_ds = Dataset(train_files, transform=train_transforms)
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 
     # **Define Model (3D U-Net)**
     model = UNet(
         spatial_dims=3,
         in_channels=1,
-        out_channels=5,  # 5 segmentation classes (LA, RA, LV, RV, MY)
+        out_channels=8,  # 
         channels=(16, 32, 64, 128, 256),
         strides=(2, 2, 2, 2),
         num_res_units=2,
@@ -67,7 +92,7 @@ def train(args):
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
 
     # **Training Loop (Iteration-Based)**
-    best_metric = -1
+    best_metric = float('inf')
     iteration = 0
     while iteration < args.iterations:
         model.train()
@@ -103,13 +128,23 @@ def train(args):
                 outputs = torch.cat(processed_outputs, dim=0)
 
             # **Compute Loss**
-            loss = loss_function(outputs, labels)
+            loss = loss_function(outputs, labels.squeeze(1).long())
             loss.backward()
             optimizer.step()
 
             iteration += 1
-            if iteration % 100 == 0:  # Print loss every 100 iterations
+            if iteration % 100 == 0 and loss.item() < best_metric:
+                best_metric = loss.item()  # Print loss every 100 iterations
                 print(f"Iteration {iteration}/{args.iterations}, Loss: {loss.item()}")
+                # Save model checkpoint
+                torch.save({
+                    'iteration': iteration,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'loss': loss,
+                    'best_metric': best_metric,
+                }, args.save_path)
+                
 
     print(f"Training complete. Best Dice Score: {best_metric}.")
 
