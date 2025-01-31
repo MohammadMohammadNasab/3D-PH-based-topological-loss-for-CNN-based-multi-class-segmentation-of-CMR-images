@@ -1,0 +1,6 @@
+numpy
+simpleitk
+connected-components-3d
+monai
+nibabel
+scipy
