@@ -5,6 +5,7 @@ import torch
 import SimpleITK as sitk
 import cc3d
 from monai.networks.nets import UNet
+from monai.data import DataLoader, Dataset
 from monai.transforms import Compose, LoadImaged, EnsureChannelFirstd, NormalizeIntensityd, ToTensord
 from scipy.spatial.distance import directed_hausdorff
 from betti_numbers import compute_betti_numbers
@@ -81,6 +82,7 @@ def evaluate_model(model_path, test_data_dir, output_report, apply_cca_flag, app
 
             # **Generate Prediction**
             output = model(image).cpu().numpy()
+            print("Prediction shape:", output.shape)  # Debugging line
             pred = np.argmax(output, axis=1).squeeze(0)  # Convert to label map
 
             # **Apply CCA if requested**
