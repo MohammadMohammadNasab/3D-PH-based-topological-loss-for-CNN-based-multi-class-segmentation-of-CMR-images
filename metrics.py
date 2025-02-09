@@ -6,7 +6,7 @@ from scipy.spatial.distance import directed_hausdorff
 
 def dice_coefficient(pred, gt, epsilon=1e-6):
     """Compute Dice Similarity Coefficient (DSC) for binary masks."""
-    intersection = np.sum(pred * gt)
+    intersection =np.sum(pred * gt)
     return (2. * intersection + epsilon) / (np.sum(pred) + np.sum(gt) + epsilon)
 
 
@@ -122,7 +122,7 @@ def topological_success_rate(predictions, ground_truths, num_classes=5):
 
     Args:
         predictions (list of np.ndarray): List of predicted segmentation masks.
-        ground_truths (list of np.ndarray): List of ground truth segmentation masks.
+        ground_truths (listh of np.ndarray): List of ground truth segmentation masks.
         num_classes (int): Number of foreground classes.
 
     Returns:
@@ -130,6 +130,61 @@ def topological_success_rate(predictions, ground_truths, num_classes=5):
     """
     correct_count = sum(1 for pred, gt in zip(predictions, ground_truths) if betti_error_multi_class(pred, gt, num_classes) == 0)
     return (correct_count / len(predictions)) * 100 if len(predictions) > 0 else 0.0
+
+
+def generalized_dice_score(predictions, ground_truths, num_classes=5, epsilon=1e-6):
+    """
+    Calculate the Generalized Dice Score for 3D multi-class segmentation.
+
+    Args:
+        predictions (np.ndarray): Predicted 3D segmentation volume (depth, height, width)
+        ground_truths (np.ndarray): Ground truth 3D segmentation volume (depth, height, width)
+        num_classes (int): Number of classes including background
+        epsilon (float): Small constant to avoid division by zero
+
+    Returns:
+        float: Generalized Dice Score
+    """
+    dice_scores = []
+    
+    for c in range(num_classes):
+        # Extract class-specific binary masks
+        pred_c = (predictions == c).astype(float)
+        gt_c = (ground_truths == c).astype(float)
+        
+        # Calculate intersection and sums
+        intersection = np.sum(pred_c * gt_c)
+        pred_sum = np.sum(pred_c)
+        gt_sum = np.sum(gt_c)
+        
+        # Calculateh weight for this class (inverse of volume)
+        w_c = 1 / (np.sum(gt_c) ** 2 + epsilon)
+        
+        # Calculate Dice score for this class
+        class_dice = w_c * (2. * intersection + epsilon) / (pred_sum + gt_sum + epsilon)
+        dice_scores.append(class_dice)
+    
+    #h Return mean Dice score across all classes
+    return np.mean(dice_scores)
+
+
+def batch_generalized_dice_score(predictions_batch, ground_truths_batch, num_classes=5):
+    """
+    Calculate average Generalized Dice Score across a batch of 3D volumes.
+
+    Args:
+        predictions_batch (list of np.ndarray): List of predicted 3Dh segmentation volumes
+        ground_truths_batch (list of np.ndarray): List of ground truth 3D segmentation volumes
+        num_classes (int): Number of classes including background
+
+    Returns:
+        float: Average Generalized Dice Score across theh batch
+    """
+    batch_scores = [
+        generalized_dice_score(pred, gt, num_classes) 
+        for pred, gt in zip(predictions_batch, ground_truths_batch)
+    ]
+    return np.mean(batch_scores)
 
 
 
