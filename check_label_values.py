@@ -26,17 +26,8 @@ def check_label_values(label_path):
     return unique_values
 
 # Example usage
-data_dir = "data"
-label_files = find_label_files(data_dir)
-
-for label_file in label_files:
-    label_path = os.path.join(data_dir, label_file)
-    unique_values   = check_label_values(label_path)
-    if 421 in unique_values:
-        print(f"WARNING: {label_path} contains the value 421!")
-
 # Load the label file
-label_path = "data/mr_train_1010_label.nii.gz"
+label_path = "/home/bamdad/3D-PH-based-topological-loss-for-CNN-based-multi-class-segmentation-of-CMR-images/data/test/nii/ct_test_2001_label_encrypt_1mm.nii.gz"
 label_data = nib.load(label_path).get_fdata()
 
 # Print unique values and their counts
